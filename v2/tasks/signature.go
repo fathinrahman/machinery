@@ -2,8 +2,9 @@ package tasks
 
 import (
 	"fmt"
-	"github.com/RichardKnop/machinery/v2/utils"
 	"time"
+
+	"github.com/RichardKnop/machinery/v2/utils"
 
 	"github.com/google/uuid"
 )
@@ -69,6 +70,10 @@ type Signature struct {
 	// IgnoreWhenTaskNotRegistered auto removes the request when there is no handeler available
 	// When this is true a task with no handler will be ignored and not placed back in the queue
 	IgnoreWhenTaskNotRegistered bool
+	// AttemptCount counts how many times this task has been executed.
+	// The maximum is 1 + RetryCount. Users should not set this field manually,
+	// Currently used by broker (e.g. MongoDB).
+	AttemptCount int
 }
 
 // NewSignature creates a new task signature

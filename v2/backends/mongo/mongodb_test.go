@@ -21,7 +21,7 @@ func newBackend() (iface.Backend, error) {
 		ResultBackend:   os.Getenv("MONGODB_URL"),
 		ResultsExpireIn: 30,
 	}
-	backend, err := mongo.New(cnf)
+	backend, err := mongo.New(cnf, "result", "group_meta")
 	if err != nil {
 		return nil, err
 	}
