@@ -63,10 +63,10 @@ Instead of factory, you will need to inject broker and backend objects to the se
 
 ```go
 import (
-  "github.com/RichardKnop/machinery/v2"
-  backendsiface "github.com/RichardKnop/machinery/v2/backends/iface"
-  brokersiface "github.com/RichardKnop/machinery/v2/brokers/iface"
-  locksiface "github.com/RichardKnop/machinery/v2/locks/iface"
+  "github.com/fathinrahman/machinery/v2"
+  backendsiface "github.com/fathinrahman/machinery/v2/backends/iface"
+  brokersiface "github.com/fathinrahman/machinery/v2/brokers/iface"
+  locksiface "github.com/fathinrahman/machinery/v2/locks/iface"
 )
 
 var broker brokersiface.Broker
@@ -81,7 +81,7 @@ server := machinery.NewServer(cnf, broker, backend, lock)
 To install recommended v2 release:
 
 ```sh
-go get github.com/RichardKnop/machinery/v2
+go get github.com/fathinrahman/machinery/v2
 ```
 
 If you want to use legacy v1 version, you still can:
