@@ -7,9 +7,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/RichardKnop/machinery/v1/brokers/iface"
-	"github.com/RichardKnop/machinery/v1/common"
-	"github.com/RichardKnop/machinery/v1/tasks"
+	"github.com/fathinrahman/machinery/v1/brokers/iface"
+	"github.com/fathinrahman/machinery/v1/common"
+	"github.com/fathinrahman/machinery/v1/tasks"
 )
 
 // Broker represents an "eager" in-memory broker

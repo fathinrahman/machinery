@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/RichardKnop/machinery/v2/config"
+	"github.com/fathinrahman/machinery/v2/config"
 	"github.com/stretchr/testify/assert"
 )
 
