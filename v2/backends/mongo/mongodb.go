@@ -3,6 +3,7 @@ package mongo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -20,20 +21,37 @@ import (
 	"github.com/fathinrahman/machinery/v2/tasks"
 )
 
+const (
+	DefaultTaskCollectionName      = "tasks"
+	DefaultGroupMetaCollectionName = "group_metas"
+)
+
 // Backend represents a MongoDB result backend
 type Backend struct {
 	common.Backend
-	client *mongo.Client
-	tc     *mongo.Collection
-	gmc    *mongo.Collection
-	once   sync.Once
+	client  *mongo.Client
+	tc      *mongo.Collection
+	gmc     *mongo.Collection
+	once    sync.Once
+	tcName  string
+	gmcName string
 }
 
 // New creates Backend instance
 func New(cnf *config.Config) (iface.Backend, error) {
+	return NewWithCollectionParams(cnf, DefaultTaskCollectionName, DefaultGroupMetaCollectionName)
+}
+
+func NewWithCollectionParams(cnf *config.Config, tcName string, gmcName string) (iface.Backend, error) {
+	if tcName == "" || gmcName == "" {
+		return nil, errors.New("task and group meta collection names must be provided")
+	}
+
 	backend := &Backend{
 		Backend: common.NewBackend(cnf),
 		once:    sync.Once{},
+		tcName:  tcName,
+		gmcName: gmcName,
 	}
 
 	return backend, nil
@@ -112,11 +130,22 @@ func (b *Backend) TriggerChord(groupUUID string) (bool, error) {
 // SetStatePending updates task state to PENDING
 func (b *Backend) SetStatePending(signature *tasks.Signature) error {
 	update := bson.M{
-		"state":      tasks.StatePending,
-		"task_name":  signature.Name,
-		"created_at": time.Now().UTC(),
+		"$set": bson.M{
+			"state": tasks.StatePending,
+		},
+		"$setOnInsert": bson.M{
+			"task_name":  signature.Name,
+			"created_at": time.Now().UTC(),
+		},
 	}
-	return b.updateState(signature, update)
+	_, err := b.tasksCollection().UpdateOne(context.Background(), bson.M{
+		"_id": signature.UUID,
+		// Ensures idempotency: duplicate Publish/SetStatePending calls with the same UUID
+		// will not override a finished or in-progress result (RECEIVED, STARTED, or SUCCESS).
+		// Updates if considered retryable (PENDING, FAILURE, and RETRY).
+		"state": bson.M{"$nin": []string{tasks.StateReceived, tasks.StateStarted, tasks.StateSuccess}},
+	}, update, options.Update().SetUpsert(true))
+	return err
 }
 
 // SetStateReceived updates task state to RECEIVED
@@ -299,8 +328,8 @@ func (b *Backend) connect() error {
 		database = b.GetConfig().MongoDB.Database
 	}
 
-	b.tc = b.client.Database(database).Collection("tasks")
-	b.gmc = b.client.Database(database).Collection("group_metas")
+	b.tc = b.client.Database(database).Collection(b.tcName)
+	b.gmc = b.client.Database(database).Collection(b.gmcName)
 
 	err = b.createMongoIndexes(database)
 	if err != nil {
@@ -341,7 +370,7 @@ func (b *Backend) dial() (*mongo.Client, error) {
 // createMongoIndexes ensures all indexes are in place
 func (b *Backend) createMongoIndexes(database string) error {
 
-	tasksCollection := b.client.Database(database).Collection("tasks")
+	tasksCollection := b.client.Database(database).Collection(b.tcName)
 
 	_, err := tasksCollection.Indexes().CreateMany(
 		context.Background(), []mongo.IndexModel{
