@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"reflect"
 	"sync"
 	"syscall"
 	"time"
@@ -30,6 +31,7 @@ type Worker struct {
 	preTaskHandler    func(*tasks.Signature)
 	postTaskHandler   func(*tasks.Signature)
 	preConsumeHandler func(*Worker) bool
+	reflectHandlers   map[string]func(tasks.Signature) ([]reflect.Value, error)
 }
 
 var (
@@ -148,7 +150,7 @@ func (worker *Worker) Process(signature *tasks.Signature) error {
 	}
 
 	// Prepare task for processing
-	task, err := tasks.NewWithSignature(taskFunc, signature)
+	task, err := tasks.NewWithSignatureAndReflectHandlers(taskFunc, signature, worker.reflectHandlers)
 	// if this failed, it means the task is malformed, probably has invalid
 	// signature, go directly to task failed without checking whether to retry
 	if err != nil {
@@ -434,4 +436,12 @@ func RedactURL(urlString string) string {
 		return urlString
 	}
 	return fmt.Sprintf("%s://%s", u.Scheme, u.Host)
+}
+
+func (worker *Worker) SetReflectHandler(taskName string, fn func(tasks.Signature) ([]reflect.Value, error)) {
+	if worker.reflectHandlers == nil {
+		worker.reflectHandlers = make(map[string]func(tasks.Signature) ([]reflect.Value, error))
+	}
+
+	worker.reflectHandlers[taskName] = fn
 }

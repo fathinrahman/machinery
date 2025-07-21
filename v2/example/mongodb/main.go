@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"time"
 
 	"github.com/google/uuid"
@@ -118,9 +121,28 @@ func startServer() (*machinery.Server, error) {
 		"split":             exampletasks.Split,
 		"panic_task":        exampletasks.PanicTask,
 		"long_running_task": exampletasks.LongRunningTask,
+		"print_message":     printMessageTask,
 	}
 
 	return server, server.RegisterTasks(tasksMap)
+}
+
+type message[T any] struct {
+	ID         string
+	Payload    T
+	Attributes map[string]string
+}
+
+type printMessagePayload struct {
+	Message string
+}
+
+func printMessageTask(ctx context.Context, msg message[printMessagePayload]) error {
+	signature := tasks.SignatureFromContext(ctx)
+	log.INFO.Printf("Received message with ID: %s, Payload: %s, Attributes: %v with taskName: %v\n",
+		msg.ID, msg.Payload.Message, msg.Attributes, signature.Name)
+
+	return nil
 }
 
 func worker() error {
@@ -149,7 +171,43 @@ func worker() error {
 		log.INFO.Println("Start of task handler for:", signature.Name)
 	})
 
+	worker.SetReflectHandler("print_message", buildReflectMessageHandler(reflect.TypeOf(printMessageTask).In(1)))
+
 	return worker.Launch()
+}
+
+func buildReflectMessageHandler(msgType reflect.Type) func(tasks.Signature) ([]reflect.Value, error) {
+	return func(signature tasks.Signature) ([]reflect.Value, error) {
+		// Get the base64-encoded payload from the signature args
+		encodedPayload := signature.Args[0].Value.(string)
+
+		// Decode the base64 payload
+		decoded, err := base64.StdEncoding.DecodeString(encodedPayload)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode base64 payload: %v", err)
+		}
+
+		msgInstance := reflect.New(msgType).Interface()
+		msgValue := reflect.ValueOf(msgInstance).Elem()
+
+		payloadField := msgValue.FieldByName("Payload")
+		if err := json.Unmarshal(decoded, payloadField.Addr().Interface()); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal decoded payload into message.Payload: %v", err)
+		}
+
+		msgValue.FieldByName("ID").SetString(signature.UUID)
+
+		attributes := make(map[string]string)
+		if signature.Headers != nil {
+			for k, v := range signature.Headers {
+				attributes[k] = fmt.Sprintf("%v", v) // Make sure value is converted to string
+			}
+		}
+		msgValue.FieldByName("Attributes").Set(reflect.ValueOf(attributes))
+
+		// Return the modified message
+		return []reflect.Value{msgValue}, nil
+	}
 }
 
 func sendTask() error {
@@ -164,20 +222,30 @@ func sendTask() error {
 		return err
 	}
 
+	payload := printMessagePayload{Message: "Hello from machinery!"}
+
+	// Marshal and encode as base64
+	msgBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal message: %w", err)
+	}
+	encoded := base64.StdEncoding.EncodeToString(msgBytes)
+
 	// Create task with ETA n seconds from now
 	eta := time.Now().Add(10 * time.Second)
 	signature := &tasks.Signature{
-		// UUID: "idempotency-test-uuid", // Comment this to ignore idempotency
-		Name: "add",
+		// UUID: "idempotency_key", // Uncomment to use idempotency key
+		Name: "print_message",
 		Args: []tasks.Arg{
-			{Type: "int64", Value: int64(1)},
-			{Type: "int64", Value: int64(2)},
+			{Type: "string", Value: encoded},
 		},
 		Priority: 1,
-		ETA:      &eta,
+		Headers: tasks.Headers{
+			"source": "example",
+		},
+		ETA: &eta,
 	}
-	ctx := context.Background()
-	asyncResult, err := server.SendTaskWithContext(ctx, signature)
+	asyncResult, err := server.SendTaskWithContext(context.Background(), signature)
 	if err != nil {
 		log.ERROR.Printf("Could not send task: %s\n", err.Error())
 

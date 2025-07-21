@@ -47,6 +47,14 @@ func SignatureFromContext(ctx context.Context) *Signature {
 
 // NewWithSignature is the same as New but injects the signature
 func NewWithSignature(taskFunc interface{}, signature *Signature) (*Task, error) {
+	return NewWithSignatureAndReflectHandlers(taskFunc, signature, nil)
+}
+
+func NewWithSignatureAndReflectHandlers(
+	taskFunc interface{},
+	signature *Signature,
+	reflectHandlers map[string]func(Signature) ([]reflect.Value, error),
+) (*Task, error) {
 	args := signature.Args
 	ctx := context.Background()
 	ctx = context.WithValue(ctx, signatureCtx, signature)
@@ -63,8 +71,16 @@ func NewWithSignature(taskFunc interface{}, signature *Signature) (*Task, error)
 		}
 	}
 
-	if err := task.ReflectArgs(args); err != nil {
-		return nil, fmt.Errorf("Reflect task args error: %s", err)
+	if reflectHandler, ok := reflectHandlers[signature.Name]; ok {
+		argValues, err := reflectHandler(*signature)
+		if err != nil {
+			return nil, fmt.Errorf("args reflectHandler error: %w", err)
+		}
+		task.Args = argValues
+	} else {
+		if err := task.ReflectArgs(args); err != nil {
+			return nil, fmt.Errorf("reflect task args error: %s", err)
+		}
 	}
 
 	return task, nil
