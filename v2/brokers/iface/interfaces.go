@@ -2,8 +2,10 @@ package iface
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/fathinrahman/machinery/v2/config"
+	"github.com/fathinrahman/machinery/v2/middlewares"
 	"github.com/fathinrahman/machinery/v2/tasks"
 )
 
@@ -18,6 +20,12 @@ type Broker interface {
 	GetPendingTasks(queue string) ([]*tasks.Signature, error)
 	GetDelayedTasks() ([]*tasks.Signature, error)
 	AdjustRoutingKey(s *tasks.Signature)
+	SetReflectHandler(taskName string, handler func(tasks.Signature) ([]reflect.Value, error))
+	SetGlobalMiddleware(globalMiddlewares ...middlewares.MiddlewareFn)
+	SetTaskMiddleware(taskName string, middlewares ...middlewares.MiddlewareFn)
+	GetReflectHandlers() map[string]func(tasks.Signature) ([]reflect.Value, error)
+	GetGlobalMiddlewares() []middlewares.MiddlewareFn
+	GetTaskMiddlewares() map[string][]middlewares.MiddlewareFn
 }
 
 // TaskProcessor - can process a delivered task

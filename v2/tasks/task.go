@@ -12,6 +12,7 @@ import (
 	opentracing_log "github.com/opentracing/opentracing-go/log"
 
 	"github.com/fathinrahman/machinery/v2/log"
+	"github.com/fathinrahman/machinery/v2/middlewares"
 )
 
 // ErrTaskPanicked ...
@@ -20,10 +21,12 @@ var ErrTaskPanicked = errors.New("Invoking task caused a panic")
 // Task wraps a signature and methods used to reflect task arguments and
 // return values after invoking the task
 type Task struct {
-	TaskFunc   reflect.Value
-	UseContext bool
-	Context    context.Context
-	Args       []reflect.Value
+	TaskFunc        reflect.Value
+	UseContext      bool
+	Context         context.Context
+	Args            []reflect.Value
+	Middlewares     []middlewares.MiddlewareFn
+	ReflectHandlers func(Signature) ([]reflect.Value, error)
 }
 
 type signatureCtxType struct{}
@@ -47,14 +50,6 @@ func SignatureFromContext(ctx context.Context) *Signature {
 
 // NewWithSignature is the same as New but injects the signature
 func NewWithSignature(taskFunc interface{}, signature *Signature) (*Task, error) {
-	return NewWithSignatureAndReflectHandlers(taskFunc, signature, nil)
-}
-
-func NewWithSignatureAndReflectHandlers(
-	taskFunc interface{},
-	signature *Signature,
-	reflectHandlers map[string]func(Signature) ([]reflect.Value, error),
-) (*Task, error) {
 	args := signature.Args
 	ctx := context.Background()
 	ctx = context.WithValue(ctx, signatureCtx, signature)
@@ -71,16 +66,8 @@ func NewWithSignatureAndReflectHandlers(
 		}
 	}
 
-	if reflectHandler, ok := reflectHandlers[signature.Name]; ok {
-		argValues, err := reflectHandler(*signature)
-		if err != nil {
-			return nil, fmt.Errorf("args reflectHandler error: %w", err)
-		}
-		task.Args = argValues
-	} else {
-		if err := task.ReflectArgs(args); err != nil {
-			return nil, fmt.Errorf("reflect task args error: %s", err)
-		}
+	if err := task.ReflectArgs(args); err != nil {
+		return nil, fmt.Errorf("Reflect task args error: %s", err)
 	}
 
 	return task, nil
@@ -148,12 +135,52 @@ func (t *Task) Call() (taskResults []*TaskResult, err error) {
 	}()
 
 	args := t.Args
+	signature := SignatureFromContext(t.Context)
 
+	if t.Middlewares != nil {
+		handler := func(ctx context.Context, taskName string, ID string, headers map[string]any, args []reflect.Value) error {
+			signature.Headers = headers
+			taskResults, err = t.prepareArgsAndInvokeTask(ctx, signature, args)
+			return err
+		}
+
+		handler = middlewares.ApplyMiddleware(handler, t.Middlewares...)
+		err = handler(t.Context, signature.Name, signature.UUID, signature.Headers, t.Args)
+	} else {
+		// If no middlewares, invoke the task directly
+		taskResults, err = t.prepareArgsAndInvokeTask(t.Context, signature, args)
+	}
+
+	return taskResults, err
+}
+
+// prepareArgsAndInvokeTask handles argument preparation, including the context, and invokes the task
+func (t *Task) prepareArgsAndInvokeTask(ctx context.Context, signature *Signature, args []reflect.Value) ([]*TaskResult, error) {
+	// Reflect the arguments if needed
+	if t.ReflectHandlers != nil {
+		argValues, err := t.ReflectHandlers(*signature)
+		if err != nil {
+			return nil, fmt.Errorf("args reflectHandler error: %w", err)
+		}
+		args = argValues
+	}
+
+	// If UseContext is true, append the context as the first argument
 	if t.UseContext {
-		ctxValue := reflect.ValueOf(t.Context)
+		ctxValue := reflect.ValueOf(ctx)
 		args = append([]reflect.Value{ctxValue}, args...)
 	}
 
+	// Invoke the task and return the results
+	taskResults, err := t.invokeTask(args)
+	if err != nil {
+		return nil, err
+	}
+
+	return taskResults, nil
+}
+
+func (t *Task) invokeTask(args []reflect.Value) ([]*TaskResult, error) {
 	// Invoke the task
 	results := t.TaskFunc.Call(args)
 
@@ -165,9 +192,7 @@ func (t *Task) Call() (taskResults []*TaskResult, err error) {
 	// Last returned value
 	lastResult := results[len(results)-1]
 
-	// If the last returned value is not nil, it has to be of error type, if that
-	// is not the case, return error message, otherwise propagate the task error
-	// to the caller
+	// If the last returned value is not nil, it must be of error type
 	if !lastResult.IsNil() {
 		// If the result implements Retriable interface, return instance of Retriable
 		retriableErrorInterface := reflect.TypeOf((*Retriable)(nil)).Elem()
@@ -175,8 +200,7 @@ func (t *Task) Call() (taskResults []*TaskResult, err error) {
 			return nil, lastResult.Interface().(ErrRetryTaskLater)
 		}
 
-		// Otherwise, check that the result implements the standard error interface,
-		// if not, return ErrLastReturnValueMustBeError error
+		// Otherwise, check that the result implements the standard error interface
 		errorInterface := reflect.TypeOf((*error)(nil)).Elem()
 		if !lastResult.Type().Implements(errorInterface) {
 			return nil, ErrLastReturnValueMustBeError
@@ -187,7 +211,7 @@ func (t *Task) Call() (taskResults []*TaskResult, err error) {
 	}
 
 	// Convert reflect values to task results
-	taskResults = make([]*TaskResult, len(results)-1)
+	taskResults := make([]*TaskResult, len(results)-1)
 	for i := 0; i < len(results)-1; i++ {
 		val := results[i].Interface()
 		typeStr := reflect.TypeOf(val).String()
@@ -197,7 +221,7 @@ func (t *Task) Call() (taskResults []*TaskResult, err error) {
 		}
 	}
 
-	return taskResults, err
+	return taskResults, nil
 }
 
 // ReflectArgs converts []TaskArg to []reflect.Value

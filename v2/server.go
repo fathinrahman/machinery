@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/fathinrahman/machinery/v2/backends/result"
 	"github.com/fathinrahman/machinery/v2/config"
 	"github.com/fathinrahman/machinery/v2/log"
+	"github.com/fathinrahman/machinery/v2/middlewares"
 	"github.com/fathinrahman/machinery/v2/tasks"
 	"github.com/fathinrahman/machinery/v2/tracing"
 	"github.com/fathinrahman/machinery/v2/utils"
@@ -108,7 +110,7 @@ func (server *Server) SetPreTaskHandler(handler func(*tasks.Signature)) {
 }
 
 // RegisterTasks registers all tasks at once
-func (server *Server) RegisterTasks(namedTaskFuncs map[string]interface{}) error {
+func (server *Server) RegisterTasks(namedTaskFuncs map[string]interface{}, middlewares ...middlewares.MiddlewareFn) error {
 	for _, task := range namedTaskFuncs {
 		if err := tasks.ValidateTask(task); err != nil {
 			return err
@@ -116,19 +118,36 @@ func (server *Server) RegisterTasks(namedTaskFuncs map[string]interface{}) error
 	}
 	for k, v := range namedTaskFuncs {
 		server.registeredTasks.Store(k, v)
+		server.broker.SetTaskMiddleware(k, middlewares...)
 	}
 	server.broker.SetRegisteredTaskNames(server.GetRegisteredTaskNames())
 	return nil
 }
 
 // RegisterTask registers a single task
-func (server *Server) RegisterTask(name string, taskFunc interface{}) error {
+func (server *Server) RegisterTask(name string, taskFunc interface{}, middlewares ...middlewares.MiddlewareFn) error {
 	if err := tasks.ValidateTask(taskFunc); err != nil {
 		return err
 	}
+	server.broker.SetTaskMiddleware(name, middlewares...)
 	server.registeredTasks.Store(name, taskFunc)
 	server.broker.SetRegisteredTaskNames(server.GetRegisteredTaskNames())
 	return nil
+}
+
+// RegisterReflectHandler registers a reflect handler for a task
+func (server *Server) RegisterReflectHandler(name string, handler func(tasks.Signature) ([]reflect.Value, error)) error {
+	if err := tasks.ValidateReflectHandler(handler); err != nil {
+		return err
+	}
+
+	server.broker.SetReflectHandler(name, handler)
+	return nil
+}
+
+// Use sets global middlewares for the broker
+func (server *Server) Use(middlewares ...middlewares.MiddlewareFn) {
+	server.broker.SetGlobalMiddleware(middlewares...)
 }
 
 // IsTaskRegistered returns true if the task name is registered with this broker

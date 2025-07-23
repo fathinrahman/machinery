@@ -2,11 +2,13 @@ package common
 
 import (
 	"errors"
+	"reflect"
 	"sync"
 
 	"github.com/fathinrahman/machinery/v2/brokers/iface"
 	"github.com/fathinrahman/machinery/v2/config"
 	"github.com/fathinrahman/machinery/v2/log"
+	"github.com/fathinrahman/machinery/v2/middlewares"
 	"github.com/fathinrahman/machinery/v2/retry"
 	"github.com/fathinrahman/machinery/v2/tasks"
 )
@@ -24,15 +26,21 @@ type Broker struct {
 	retryFunc           func(chan int)
 	retryStopChan       chan int
 	stopChan            chan int
+	reflectHandlers     map[string]func(tasks.Signature) ([]reflect.Value, error)
+	middlewares         []middlewares.MiddlewareFn
+	taskMiddlewares     map[string][]middlewares.MiddlewareFn
 }
 
 // NewBroker creates new Broker instance
 func NewBroker(cnf *config.Config) Broker {
 	return Broker{
-		cnf:           cnf,
-		retry:         true,
-		stopChan:      make(chan int),
-		retryStopChan: make(chan int),
+		cnf:             cnf,
+		retry:           true,
+		stopChan:        make(chan int),
+		retryStopChan:   make(chan int),
+		reflectHandlers: make(map[string]func(tasks.Signature) ([]reflect.Value, error)),
+		middlewares:     []middlewares.MiddlewareFn{},
+		taskMiddlewares: make(map[string][]middlewares.MiddlewareFn),
 	}
 }
 
@@ -136,4 +144,47 @@ func (b *Broker) AdjustRoutingKey(s *tasks.Signature) {
 	}
 
 	s.RoutingKey = b.GetConfig().DefaultQueue
+}
+
+func (b *Broker) SetReflectHandler(taskName string, fn func(tasks.Signature) ([]reflect.Value, error)) {
+	if b.reflectHandlers == nil {
+		b.reflectHandlers = make(map[string]func(tasks.Signature) ([]reflect.Value, error))
+	}
+
+	b.reflectHandlers[taskName] = fn
+}
+
+// SetGlobalMiddleware sets the global middlewares
+func (b *Broker) SetGlobalMiddleware(middlewares ...middlewares.MiddlewareFn) {
+	b.middlewares = middlewares
+}
+
+// SetTaskMiddleware sets the task-specific middlewares
+func (b *Broker) SetTaskMiddleware(taskName string, middlewares ...middlewares.MiddlewareFn) {
+	b.taskMiddlewares[taskName] = middlewares
+}
+
+func (b *Broker) GetReflectHandlers() map[string]func(tasks.Signature) ([]reflect.Value, error) {
+	return b.reflectHandlers
+}
+
+func (b *Broker) GetGlobalMiddlewares() []middlewares.MiddlewareFn {
+	return b.middlewares
+}
+
+func (b *Broker) GetTaskMiddlewares() map[string][]middlewares.MiddlewareFn {
+	return b.taskMiddlewares
+}
+
+// ApplyMiddlewares applies the middlewares to a given handler
+func (b *Broker) ApplyMiddlewares(handler middlewares.ExecuteHandlerFn, taskName string) middlewares.ExecuteHandlerFn {
+	// Apply global middlewares first
+	handler = middlewares.ApplyMiddleware(handler, b.middlewares...)
+
+	// Apply task-specific middlewares
+	if taskMws, ok := b.taskMiddlewares[taskName]; ok {
+		handler = middlewares.ApplyMiddleware(handler, taskMws...)
+	}
+
+	return handler
 }

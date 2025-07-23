@@ -23,6 +23,7 @@ import (
 	"github.com/fathinrahman/machinery/v2/example/tracers"
 	eagerlock "github.com/fathinrahman/machinery/v2/locks/eager"
 	"github.com/fathinrahman/machinery/v2/log"
+	"github.com/fathinrahman/machinery/v2/middlewares"
 	"github.com/fathinrahman/machinery/v2/tasks"
 	"github.com/opentracing/opentracing-go"
 	opentracinglog "github.com/opentracing/opentracing-go/log"
@@ -124,7 +125,11 @@ func startServer() (*machinery.Server, error) {
 		"print_message":     printMessageTask,
 	}
 
-	return server, server.RegisterTasks(tasksMap)
+	if server.RegisterReflectHandler("print_message", buildReflectMessageHandler(reflect.TypeOf(printMessageTask).In(1))); err != nil {
+		return nil, fmt.Errorf("RegisterReflectHandler failed: %v", err)
+	}
+
+	return server, server.RegisterTasks(tasksMap, injectHeadersMiddleware("middlewareKey", "middlewareValue"))
 }
 
 type message[T any] struct {
@@ -139,8 +144,8 @@ type printMessagePayload struct {
 
 func printMessageTask(ctx context.Context, msg message[printMessagePayload]) error {
 	signature := tasks.SignatureFromContext(ctx)
-	log.INFO.Printf("Received message with ID: %s, Payload: %s, Attributes: %v with taskName: %v\n",
-		msg.ID, msg.Payload.Message, msg.Attributes, signature.Name)
+	log.INFO.Printf("Received message with ID: %s, Payload: %s, Attributes: %v with taskName: %v and ctx: %v\n",
+		msg.ID, msg.Payload.Message, msg.Attributes, signature.Name, ctx)
 
 	return nil
 }
@@ -170,8 +175,6 @@ func worker() error {
 	worker.SetPreTaskHandler(func(signature *tasks.Signature) {
 		log.INFO.Println("Start of task handler for:", signature.Name)
 	})
-
-	worker.SetReflectHandler("print_message", buildReflectMessageHandler(reflect.TypeOf(printMessageTask).In(1)))
 
 	return worker.Launch()
 }
@@ -207,6 +210,40 @@ func buildReflectMessageHandler(msgType reflect.Type) func(tasks.Signature) ([]r
 
 		// Return the modified message
 		return []reflect.Value{msgValue}, nil
+	}
+}
+
+// func injectHeadersMiddleware(key, val string) middlewares.MiddlewareFn {
+// 	return func(next middlewares.ExecuteHandlerFn) middlewares.ExecuteHandlerFn {
+// 		return func(signature *tasks.Signature) error {
+// 			if signature.Headers == nil {
+// 				signature.Headers = make(tasks.Headers)
+// 			}
+
+// 			signature.Headers.Set(key, "middlewareValue")
+
+// 			// Call the next handler/middleware
+// 			return next(signature)
+// 		}
+// 	}
+// }
+
+func injectHeadersMiddleware(key, val string) middlewares.MiddlewareFn {
+	return func(next middlewares.ExecuteHandlerFn) middlewares.ExecuteHandlerFn {
+		return func(
+			ctx context.Context,
+			taskName string,
+			ID string,
+			headers map[string]any,
+			args []reflect.Value) error {
+			// signature := tasks.SignatureFromContext(ctx) // Ensure signature is set in context
+			type contextKey string
+			ctx = context.WithValue(ctx, contextKey("middlewareKey"), "middlewareValue") // Optionally set in context
+			log.INFO.Printf("Injecting middleware ctx: %v", ctx)
+
+			headers[key] = val // Inject into attributes map
+			return next(ctx, taskName, ID, headers, args)
+		}
 	}
 }
 
