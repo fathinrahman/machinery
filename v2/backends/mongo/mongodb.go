@@ -13,11 +13,11 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
-	"github.com/RichardKnop/machinery/v2/backends/iface"
-	"github.com/RichardKnop/machinery/v2/common"
-	"github.com/RichardKnop/machinery/v2/config"
-	"github.com/RichardKnop/machinery/v2/log"
-	"github.com/RichardKnop/machinery/v2/tasks"
+	"github.com/fathinrahman/machinery/v2/backends/iface"
+	"github.com/fathinrahman/machinery/v2/common"
+	"github.com/fathinrahman/machinery/v2/config"
+	"github.com/fathinrahman/machinery/v2/log"
+	"github.com/fathinrahman/machinery/v2/tasks"
 )
 
 // Backend represents a MongoDB result backend
@@ -141,9 +141,9 @@ func (b *Backend) SetStateRetry(signature *tasks.Signature) error {
 func (b *Backend) SetStateSuccess(signature *tasks.Signature, results []*tasks.TaskResult) error {
 	decodedResults := b.decodeResults(results)
 	update := bson.M{
-		"state":   tasks.StateSuccess,
-		"results": decodedResults,
-		"delete_at":     time.Now().Add(time.Duration(b.GetConfig().ResultsExpireIn) * time.Second),
+		"state":     tasks.StateSuccess,
+		"results":   decodedResults,
+		"delete_at": time.Now().Add(time.Duration(b.GetConfig().ResultsExpireIn) * time.Second),
 	}
 	return b.updateState(signature, update)
 }
@@ -173,9 +173,9 @@ func (b *Backend) decodeResults(results []*tasks.TaskResult) []*tasks.TaskResult
 // SetStateFailure updates task state to FAILURE
 func (b *Backend) SetStateFailure(signature *tasks.Signature, err string) error {
 	update := bson.M{
-		"state": tasks.StateFailure,
-		"error": err,
-		"delete_at":   time.Now().Add(time.Duration(b.GetConfig().ResultsExpireIn) * time.Second),
+		"state":     tasks.StateFailure,
+		"error":     err,
+		"delete_at": time.Now().Add(time.Duration(b.GetConfig().ResultsExpireIn) * time.Second),
 	}
 	return b.updateState(signature, update)
 }

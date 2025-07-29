@@ -9,27 +9,27 @@ import (
 
 	neturl "net/url"
 
-	"github.com/RichardKnop/machinery/v1/config"
+	"github.com/fathinrahman/machinery/v1/config"
 
-	amqpbroker "github.com/RichardKnop/machinery/v1/brokers/amqp"
-	eagerbroker "github.com/RichardKnop/machinery/v1/brokers/eager"
-	gcppubsubbroker "github.com/RichardKnop/machinery/v1/brokers/gcppubsub"
-	brokeriface "github.com/RichardKnop/machinery/v1/brokers/iface"
-	redisbroker "github.com/RichardKnop/machinery/v1/brokers/redis"
-	sqsbroker "github.com/RichardKnop/machinery/v1/brokers/sqs"
+	amqpbroker "github.com/fathinrahman/machinery/v1/brokers/amqp"
+	eagerbroker "github.com/fathinrahman/machinery/v1/brokers/eager"
+	gcppubsubbroker "github.com/fathinrahman/machinery/v1/brokers/gcppubsub"
+	brokeriface "github.com/fathinrahman/machinery/v1/brokers/iface"
+	redisbroker "github.com/fathinrahman/machinery/v1/brokers/redis"
+	sqsbroker "github.com/fathinrahman/machinery/v1/brokers/sqs"
 
-	amqpbackend "github.com/RichardKnop/machinery/v1/backends/amqp"
-	dynamobackend "github.com/RichardKnop/machinery/v1/backends/dynamodb"
-	eagerbackend "github.com/RichardKnop/machinery/v1/backends/eager"
-	backendiface "github.com/RichardKnop/machinery/v1/backends/iface"
-	memcachebackend "github.com/RichardKnop/machinery/v1/backends/memcache"
-	mongobackend "github.com/RichardKnop/machinery/v1/backends/mongo"
-	nullbackend "github.com/RichardKnop/machinery/v1/backends/null"
-	redisbackend "github.com/RichardKnop/machinery/v1/backends/redis"
+	amqpbackend "github.com/fathinrahman/machinery/v1/backends/amqp"
+	dynamobackend "github.com/fathinrahman/machinery/v1/backends/dynamodb"
+	eagerbackend "github.com/fathinrahman/machinery/v1/backends/eager"
+	backendiface "github.com/fathinrahman/machinery/v1/backends/iface"
+	memcachebackend "github.com/fathinrahman/machinery/v1/backends/memcache"
+	mongobackend "github.com/fathinrahman/machinery/v1/backends/mongo"
+	nullbackend "github.com/fathinrahman/machinery/v1/backends/null"
+	redisbackend "github.com/fathinrahman/machinery/v1/backends/redis"
 
-	eagerlock "github.com/RichardKnop/machinery/v1/locks/eager"
-	lockiface "github.com/RichardKnop/machinery/v1/locks/iface"
-	redislock "github.com/RichardKnop/machinery/v1/locks/redis"
+	eagerlock "github.com/fathinrahman/machinery/v1/locks/eager"
+	lockiface "github.com/fathinrahman/machinery/v1/locks/iface"
+	redislock "github.com/fathinrahman/machinery/v1/locks/redis"
 )
 
 // BrokerFactory creates a new object of iface.Broker

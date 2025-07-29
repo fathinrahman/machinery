@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/RichardKnop/machinery/v1/backends/eager"
-	"github.com/RichardKnop/machinery/v1/backends/iface"
-	"github.com/RichardKnop/machinery/v1/tasks"
+	"github.com/fathinrahman/machinery/v1/backends/eager"
+	"github.com/fathinrahman/machinery/v1/backends/iface"
+	"github.com/fathinrahman/machinery/v1/tasks"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -324,9 +324,7 @@ func (s *EagerBackendTestSuite) TestPurgeGroupMeta() {
 	}
 }
 
-//
 // internal method
-//
 func (s *EagerBackendTestSuite) getTaskSignature(taskUUID string) *tasks.Signature {
 	for _, v := range s.st {
 		if v.UUID == taskUUID {

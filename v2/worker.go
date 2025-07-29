@@ -11,13 +11,13 @@ import (
 	"time"
 
 	"github.com/opentracing/opentracing-go"
-	
-	"github.com/RichardKnop/machinery/v2/backends/amqp"
-	"github.com/RichardKnop/machinery/v2/brokers/errs"
-	"github.com/RichardKnop/machinery/v2/log"
-	"github.com/RichardKnop/machinery/v2/retry"
-	"github.com/RichardKnop/machinery/v2/tasks"
-	"github.com/RichardKnop/machinery/v2/tracing"
+
+	"github.com/fathinrahman/machinery/v2/backends/amqp"
+	"github.com/fathinrahman/machinery/v2/brokers/errs"
+	"github.com/fathinrahman/machinery/v2/log"
+	"github.com/fathinrahman/machinery/v2/retry"
+	"github.com/fathinrahman/machinery/v2/tasks"
+	"github.com/fathinrahman/machinery/v2/tracing"
 )
 
 // Worker represents a single worker process
@@ -400,27 +400,26 @@ func (worker *Worker) SetErrorHandler(handler func(err error)) {
 	worker.errorHandler = handler
 }
 
-//SetPreTaskHandler sets a custom handler func before a job is started
+// SetPreTaskHandler sets a custom handler func before a job is started
 func (worker *Worker) SetPreTaskHandler(handler func(*tasks.Signature)) {
 	worker.preTaskHandler = handler
 }
 
-//SetPostTaskHandler sets a custom handler for the end of a job
+// SetPostTaskHandler sets a custom handler for the end of a job
 func (worker *Worker) SetPostTaskHandler(handler func(*tasks.Signature)) {
 	worker.postTaskHandler = handler
 }
 
-//SetPreConsumeHandler sets a custom handler for the end of a job
+// SetPreConsumeHandler sets a custom handler for the end of a job
 func (worker *Worker) SetPreConsumeHandler(handler func(*Worker) bool) {
 	worker.preConsumeHandler = handler
 }
 
-//GetServer returns server
+// GetServer returns server
 func (worker *Worker) GetServer() *Server {
 	return worker.server
 }
 
-//
 func (worker *Worker) PreConsumeHandler() bool {
 	if worker.preConsumeHandler == nil {
 		return true
