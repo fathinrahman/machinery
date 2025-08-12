@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/urfave/cli"
-	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/fathinrahman/machinery/v2"
 	"github.com/fathinrahman/machinery/v2/backends/mongo"
@@ -84,8 +83,6 @@ func mongoConfig() *config.Config {
 		ResultsExpireIn: 0,
 		MongoDB: &config.MongoDBConfig{
 			Database: "machinery",
-			Options: *options.Client().SetMaxPoolSize(10).
-				SetMinPoolSize(1).SetTimeout(3 * time.Second),
 		},
 	}
 }

@@ -77,15 +77,13 @@ func New(
 		stuckTaskExpiry: stuckTaskExpiry,
 	}
 
-	client, db, err := b.MongoDBConnector.Connect(cnf)
+	db, err := b.MongoDBConnector.Connect(cnf)
 	if err != nil {
-		return nil, fmt.Errorf("MongoDB connection failed: %v", err)
+		return nil, fmt.Errorf("mongoDB connection failed: %v", err)
 	}
 
-	cnf.MongoDB.Client = client
-
+	cnf.MongoDB.Client = db.Client()
 	b.Broker = common.NewBroker(cnf)
-
 	b.taskColl = db.Collection(taskCollName)
 	b.lockColl = db.Collection(lockCollName)
 
@@ -98,14 +96,17 @@ func validateBrokerParams(
 	taskCollName string,
 	lockCollName string,
 ) error {
-	if cnf == nil || cnf.Broker == "" || cnf.MongoDB == nil {
-		return errors.New("MongoDB configuration is required")
+	if cnf == nil || cnf.MongoDB == nil || cnf.MongoDB.Database == "" {
+		return errors.New("mongoDB database is required")
+	}
+	if cnf.MongoDB.Client == nil && cnf.Broker == "" {
+		return errors.New("mongoDB client or broker is required")
 	}
 	if queue == "" {
-		return errors.New("queue must be provided")
+		return errors.New("queue is required")
 	}
 	if taskCollName == "" || lockCollName == "" {
-		return errors.New("task and lock collection names must be provided")
+		return errors.New("task and lock collection names are required")
 	}
 
 	return nil
@@ -154,8 +155,7 @@ func (b *Broker) Publish(ctx context.Context, signature *tasks.Signature) error 
 		},
 	}
 
-	opts := options.Update()
-	res, err := b.taskColl.UpdateOne(ctx, filter, update, opts)
+	res, err := b.taskColl.UpdateOne(ctx, filter, update)
 	if err != nil {
 		log.ERROR.Printf("publish retry failed to update: error with signature UUID %s: %v", signature.UUID, err)
 
