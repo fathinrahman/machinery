@@ -19,6 +19,12 @@ import (
 	"github.com/fathinrahman/machinery/v2/tasks"
 )
 
+const (
+	defaultTCName          = "machinery_task"
+	defaultLCName          = "machinery_lock"
+	defaultStuckTaskExpiry = 15 * time.Minute
+)
+
 type TaskStatus string
 
 const (
@@ -38,10 +44,9 @@ type Broker struct {
 	common.MongoDBConnector
 
 	// Configuration
-	queue           string
 	stuckTaskExpiry time.Duration
 
-	// MongoDB collection
+	// MongoDB collections
 	taskColl *mongo.Collection
 	lockColl *mongo.Collection
 
@@ -60,56 +65,73 @@ type Task struct {
 	ErrorMessage string             `bson:"error_message,omitempty" json:"error_message,omitempty"`
 }
 
+type Option struct {
+	TaskCollectionName string
+	LockCollectionName string
+	StuckTaskExpiry    time.Duration
+}
+
 // New returns a new MongoDB-backed Machinery broker as iface.Broker.
 func New(
 	cnf *config.Config,
-	queue string,
-	taskCollName string,
-	lockCollName string,
-	stuckTaskExpiry time.Duration,
+	opt *Option,
 ) (iface.Broker, error) {
-	if err := validateBrokerParams(cnf, queue, taskCollName, lockCollName); err != nil {
+	if err := validateConfig(cnf); err != nil {
 		return nil, err
 	}
 
+	opt = setOptions(opt)
+
 	b := &Broker{
-		queue:           queue,
-		stuckTaskExpiry: stuckTaskExpiry,
+		stuckTaskExpiry: opt.StuckTaskExpiry,
 	}
 
 	db, err := b.MongoDBConnector.Connect(cnf)
 	if err != nil {
 		return nil, fmt.Errorf("mongoDB connection failed: %v", err)
 	}
-
 	cnf.MongoDB.Client = db.Client()
+	b.taskColl = db.Collection(opt.TaskCollectionName)
+	b.lockColl = db.Collection(opt.LockCollectionName)
+
 	b.Broker = common.NewBroker(cnf)
-	b.taskColl = db.Collection(taskCollName)
-	b.lockColl = db.Collection(lockCollName)
 
 	return b, nil
 }
 
-func validateBrokerParams(
-	cnf *config.Config,
-	queue string,
-	taskCollName string,
-	lockCollName string,
-) error {
+func validateConfig(cnf *config.Config) error {
 	if cnf == nil || cnf.MongoDB == nil || cnf.MongoDB.Database == "" {
 		return errors.New("mongoDB database is required")
 	}
 	if cnf.MongoDB.Client == nil && cnf.Broker == "" {
 		return errors.New("mongoDB client or broker is required")
 	}
-	if queue == "" {
+	if cnf.DefaultQueue == "" {
 		return errors.New("queue is required")
-	}
-	if taskCollName == "" || lockCollName == "" {
-		return errors.New("task and lock collection names are required")
 	}
 
 	return nil
+}
+
+func setOptions(opt *Option) *Option {
+	newOpt := &Option{
+		TaskCollectionName: defaultTCName,
+		LockCollectionName: defaultLCName,
+		StuckTaskExpiry:    defaultStuckTaskExpiry,
+	}
+	if opt != nil {
+		if opt.TaskCollectionName != "" {
+			newOpt.TaskCollectionName = opt.TaskCollectionName
+		}
+		if opt.LockCollectionName != "" {
+			newOpt.LockCollectionName = opt.LockCollectionName
+		}
+		if opt.StuckTaskExpiry > 0 {
+			newOpt.StuckTaskExpiry = opt.StuckTaskExpiry
+		}
+	}
+
+	return newOpt
 }
 
 // Publish inserts a new task into MongoDB with "pending" status and handles ETA.
@@ -124,7 +146,7 @@ func (b *Broker) Publish(ctx context.Context, signature *tasks.Signature) error 
 
 	if signature.AttemptCount == 0 {
 		task := Task{
-			Queue:     b.queue,
+			Queue:     b.GetConfig().DefaultQueue,
 			Signature: *signature,
 			Status:    TaskStatusPending,
 			CreatedAt: now,
@@ -178,7 +200,7 @@ func (b *Broker) StartConsuming(
 	concurrency int,
 	processor iface.TaskProcessor,
 ) (bool, error) {
-	log.INFO.Printf("***** start consuming: MongoDB broker on queue '%s' with concurrency %d *****", b.queue, concurrency)
+	log.INFO.Printf("***** start consuming: MongoDB broker on queue '%s' with concurrency %d *****", b.GetConfig().DefaultQueue, concurrency)
 
 	if concurrency < 1 {
 		concurrency = 1
@@ -260,7 +282,7 @@ func (b *Broker) StartConsuming(
 func (b *Broker) claimNextTask() *Task {
 	now := time.Now().UTC()
 	filter := bson.M{
-		"queue":  b.queue,
+		"queue":  b.GetConfig().DefaultQueue,
 		"status": TaskStatusPending,
 		"signature.eta": bson.M{
 			"$lte": now,
@@ -330,7 +352,7 @@ func (b *Broker) handleTask(processor iface.TaskProcessor, signature *tasks.Sign
 
 // StopConsuming stops all workers and pollers gracefully, disconnects from MongoDB.
 func (b *Broker) StopConsuming() {
-	log.INFO.Printf("***** stop consuming: MongoDB broker on queue '%s' *****", b.queue)
+	log.INFO.Printf("***** stop consuming: MongoDB broker on queue '%s' *****", b.GetConfig().DefaultQueue)
 	b.Broker.StopConsuming()
 
 	b.processingWG.Wait()
@@ -360,7 +382,7 @@ type lock struct {
 }
 
 func (b *Broker) recoveryLockKey() string {
-	return recoveryLockKeyPrefix + b.queue
+	return recoveryLockKeyPrefix + b.GetConfig().DefaultQueue
 }
 
 func (b *Broker) initRecoveryLock() error {
@@ -441,7 +463,7 @@ func (b *Broker) recoverStuckTasks(expiry time.Duration) {
 	threshold := now.Add(-expiry)
 	filter := bson.M{
 		"status": TaskStatusInProgress,
-		"queue":  b.queue,
+		"queue":  b.GetConfig().DefaultQueue,
 		"updated_at": bson.M{
 			"$lt": threshold,
 		},
@@ -527,7 +549,7 @@ func (b *Broker) createMongoIndexes() error {
 func (b *Broker) GetAllTasksByStatusWithLimit(status TaskStatus, limit int64) ([]Task, error) {
 	ctx := context.Background()
 	filter := bson.M{
-		"queue":  b.queue,
+		"queue":  b.GetConfig().DefaultQueue,
 		"status": status,
 	}
 

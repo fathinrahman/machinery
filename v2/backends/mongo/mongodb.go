@@ -3,7 +3,6 @@ package mongo
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -22,8 +21,8 @@ import (
 )
 
 const (
-	DefaultTaskCollectionName      = "tasks"
-	DefaultGroupMetaCollectionName = "group_metas"
+	defaultTCName  = "tasks"
+	defaultGMCName = "group_metas"
 )
 
 // Backend represents a MongoDB result backend
@@ -37,21 +36,29 @@ type Backend struct {
 	gmcName string
 }
 
-// New creates Backend instance
-func New(cnf *config.Config) (iface.Backend, error) {
-	return NewWithCollectionParams(cnf, DefaultTaskCollectionName, DefaultGroupMetaCollectionName)
+type Option struct {
+	TaskCollectionName      string
+	GroupMetaCollectionName string
 }
 
-func NewWithCollectionParams(cnf *config.Config, tcName string, gmcName string) (iface.Backend, error) {
-	if tcName == "" || gmcName == "" {
-		return nil, errors.New("task and group meta collection names must be provided")
+// New creates Backend instance
+func New(cnf *config.Config) (iface.Backend, error) {
+	return NewWithOptions(cnf, nil)
+}
+
+func NewWithOptions(cnf *config.Config, opt *Option) (iface.Backend, error) {
+	if opt == nil {
+		opt = &Option{
+			TaskCollectionName:      defaultTCName,
+			GroupMetaCollectionName: defaultGMCName,
+		}
 	}
 
 	backend := &Backend{
 		Backend: common.NewBackend(cnf),
 		once:    sync.Once{},
-		tcName:  tcName,
-		gmcName: gmcName,
+		tcName:  opt.TaskCollectionName,
+		gmcName: opt.GroupMetaCollectionName,
 	}
 
 	return backend, nil
@@ -347,8 +354,8 @@ func (b *Backend) dial() (*mongo.Client, error) {
 	}
 
 	uri := b.GetConfig().ResultBackend
-	if strings.HasPrefix(uri, "mongodb://") == false &&
-		strings.HasPrefix(uri, "mongodb+srv://") == false {
+	if !strings.HasPrefix(uri, "mongodb://") &&
+		!strings.HasPrefix(uri, "mongodb+srv://") {
 		uri = fmt.Sprintf("mongodb://%s", uri)
 	}
 
