@@ -172,9 +172,9 @@ type GCPPubSubConfig struct {
 type MongoDBConfig struct {
 	Client                  *mongo.Client
 	Database                string
+	TaskCollectionName      string
 	ResultCollectionName    string
 	GroupMetaCollectionName string
-	TaskCollectionName      string
 	LockCollectionName      string
 	StuckTaskExpiry         time.Duration
 }

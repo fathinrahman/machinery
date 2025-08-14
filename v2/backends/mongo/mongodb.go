@@ -30,14 +30,9 @@ const (
 type Backend struct {
 	common.Backend
 	client *mongo.Client
-	rc     *mongo.Collection
+	tc     *mongo.Collection
 	gmc    *mongo.Collection
 	once   sync.Once
-}
-
-type Option struct {
-	TaskCollectionName      string
-	GroupMetaCollectionName string
 }
 
 // New creates Backend instance
@@ -311,7 +306,7 @@ func (b *Backend) tasksCollection() *mongo.Collection {
 		b.connect()
 	})
 
-	return b.rc
+	return b.tc
 }
 
 func (b *Backend) groupMetasCollection() *mongo.Collection {
@@ -333,7 +328,7 @@ func (b *Backend) connect() error {
 
 	database := b.GetConfig().MongoDB.Database
 
-	b.rc = b.client.Database(database).Collection(
+	b.tc = b.client.Database(database).Collection(
 		b.GetConfig().MongoDB.ResultCollectionName)
 	b.gmc = b.client.Database(database).Collection(
 		b.GetConfig().MongoDB.GroupMetaCollectionName)
@@ -377,7 +372,7 @@ func (b *Backend) dial() (*mongo.Client, error) {
 
 // createMongoIndexes ensures all indexes are in place
 func (b *Backend) createMongoIndexes() error {
-	_, err := b.rc.Indexes().CreateMany(
+	_, err := b.tc.Indexes().CreateMany(
 		context.Background(), []mongo.IndexModel{
 			{
 				Keys:    bson.M{"delete_at": 1},
