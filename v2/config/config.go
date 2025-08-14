@@ -170,8 +170,13 @@ type GCPPubSubConfig struct {
 
 // MongoDBConfig ...
 type MongoDBConfig struct {
-	Client   *mongo.Client
-	Database string
+	Client                  *mongo.Client
+	Database                string
+	ResultCollectionName    string
+	GroupMetaCollectionName string
+	TaskCollectionName      string
+	LockCollectionName      string
+	StuckTaskExpiry         time.Duration
 }
 
 // Decode from yaml to map (any field whose type or pointer-to-type implements

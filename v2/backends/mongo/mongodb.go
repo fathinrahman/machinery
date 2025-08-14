@@ -21,19 +21,18 @@ import (
 )
 
 const (
-	defaultTCName  = "machinery_result"
-	defaultGMCName = "machinery_group_meta"
+	defaultDatabaseName = "machinery"
+	defaultRCName       = "machinery_result"
+	defaultGMCName      = "machinery_group_meta"
 )
 
 // Backend represents a MongoDB result backend
 type Backend struct {
 	common.Backend
-	client  *mongo.Client
-	tc      *mongo.Collection
-	gmc     *mongo.Collection
-	once    sync.Once
-	tcName  string
-	gmcName string
+	client *mongo.Client
+	rc     *mongo.Collection
+	gmc    *mongo.Collection
+	once   sync.Once
 }
 
 type Option struct {
@@ -43,25 +42,28 @@ type Option struct {
 
 // New creates Backend instance
 func New(cnf *config.Config) (iface.Backend, error) {
-	return NewWithOptions(cnf, nil)
-}
-
-func NewWithOptions(cnf *config.Config, opt *Option) (iface.Backend, error) {
-	if opt == nil {
-		opt = &Option{
-			TaskCollectionName:      defaultTCName,
-			GroupMetaCollectionName: defaultGMCName,
-		}
-	}
+	cnf.MongoDB = setDefaultConfig(cnf.MongoDB)
 
 	backend := &Backend{
 		Backend: common.NewBackend(cnf),
 		once:    sync.Once{},
-		tcName:  opt.TaskCollectionName,
-		gmcName: opt.GroupMetaCollectionName,
 	}
 
 	return backend, nil
+}
+
+func setDefaultConfig(cnf *config.MongoDBConfig) *config.MongoDBConfig {
+	if cnf.ResultCollectionName == "" {
+		cnf.ResultCollectionName = defaultRCName
+	}
+	if cnf.GroupMetaCollectionName == "" {
+		cnf.GroupMetaCollectionName = defaultGMCName
+	}
+	if cnf.Database == "" {
+		cnf.Database = defaultDatabaseName
+	}
+
+	return cnf
 }
 
 // InitGroup creates and saves a group meta data object
@@ -309,7 +311,7 @@ func (b *Backend) tasksCollection() *mongo.Collection {
 		b.connect()
 	})
 
-	return b.tc
+	return b.rc
 }
 
 func (b *Backend) groupMetasCollection() *mongo.Collection {
@@ -329,19 +331,18 @@ func (b *Backend) connect() error {
 	}
 	b.client = client
 
-	database := "machinery"
+	database := b.GetConfig().MongoDB.Database
 
-	if b.GetConfig().MongoDB != nil {
-		database = b.GetConfig().MongoDB.Database
-	}
+	b.rc = b.client.Database(database).Collection(
+		b.GetConfig().MongoDB.ResultCollectionName)
+	b.gmc = b.client.Database(database).Collection(
+		b.GetConfig().MongoDB.GroupMetaCollectionName)
 
-	b.tc = b.client.Database(database).Collection(b.tcName)
-	b.gmc = b.client.Database(database).Collection(b.gmcName)
-
-	err = b.createMongoIndexes(database)
+	err = b.createMongoIndexes()
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -375,11 +376,8 @@ func (b *Backend) dial() (*mongo.Client, error) {
 }
 
 // createMongoIndexes ensures all indexes are in place
-func (b *Backend) createMongoIndexes(database string) error {
-
-	tasksCollection := b.client.Database(database).Collection(b.tcName)
-
-	_, err := tasksCollection.Indexes().CreateMany(
+func (b *Backend) createMongoIndexes() error {
+	_, err := b.rc.Indexes().CreateMany(
 		context.Background(), []mongo.IndexModel{
 			{
 				Keys:    bson.M{"delete_at": 1},

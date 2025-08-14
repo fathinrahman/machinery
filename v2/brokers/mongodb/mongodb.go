@@ -47,8 +47,8 @@ type Broker struct {
 	stuckTaskExpiry time.Duration
 
 	// MongoDB collections
-	taskColl *mongo.Collection
-	lockColl *mongo.Collection
+	tc *mongo.Collection
+	lc *mongo.Collection
 
 	// Sync wait groups for processing task and recovering stuck tasks
 	processingWG sync.WaitGroup
@@ -65,25 +65,16 @@ type Task struct {
 	ErrorMessage string             `bson:"error_message,omitempty" json:"error_message,omitempty"`
 }
 
-type Option struct {
-	TaskCollectionName string
-	LockCollectionName string
-	StuckTaskExpiry    time.Duration
-}
-
 // New returns a new MongoDB-backed Machinery broker as iface.Broker.
-func New(
-	cnf *config.Config,
-	opt *Option,
-) (iface.Broker, error) {
+func New(cnf *config.Config) (iface.Broker, error) {
 	if err := validateConfig(cnf); err != nil {
 		return nil, err
 	}
 
-	opt = setOptions(opt)
+	cnf.MongoDB = setDefaultConfig(cnf.MongoDB)
 
 	b := &Broker{
-		stuckTaskExpiry: opt.StuckTaskExpiry,
+		stuckTaskExpiry: cnf.MongoDB.StuckTaskExpiry,
 	}
 
 	db, err := b.MongoDBConnector.Connect(cnf)
@@ -91,8 +82,8 @@ func New(
 		return nil, fmt.Errorf("mongoDB connection failed: %v", err)
 	}
 	cnf.MongoDB.Client = db.Client()
-	b.taskColl = db.Collection(opt.TaskCollectionName)
-	b.lockColl = db.Collection(opt.LockCollectionName)
+	b.tc = db.Collection(cnf.MongoDB.TaskCollectionName)
+	b.lc = db.Collection(cnf.MongoDB.LockCollectionName)
 
 	b.Broker = common.NewBroker(cnf)
 
@@ -113,25 +104,18 @@ func validateConfig(cnf *config.Config) error {
 	return nil
 }
 
-func setOptions(opt *Option) *Option {
-	newOpt := &Option{
-		TaskCollectionName: defaultTCName,
-		LockCollectionName: defaultLCName,
-		StuckTaskExpiry:    defaultStuckTaskExpiry,
+func setDefaultConfig(cnf *config.MongoDBConfig) *config.MongoDBConfig {
+	if cnf.TaskCollectionName == "" {
+		cnf.TaskCollectionName = defaultTCName
 	}
-	if opt != nil {
-		if opt.TaskCollectionName != "" {
-			newOpt.TaskCollectionName = opt.TaskCollectionName
-		}
-		if opt.LockCollectionName != "" {
-			newOpt.LockCollectionName = opt.LockCollectionName
-		}
-		if opt.StuckTaskExpiry > 0 {
-			newOpt.StuckTaskExpiry = opt.StuckTaskExpiry
-		}
+	if cnf.LockCollectionName == "" {
+		cnf.LockCollectionName = defaultLCName
+	}
+	if cnf.StuckTaskExpiry <= 0 {
+		cnf.StuckTaskExpiry = defaultStuckTaskExpiry
 	}
 
-	return newOpt
+	return cnf
 }
 
 // Publish inserts a new task into MongoDB with "pending" status and handles ETA.
@@ -153,7 +137,7 @@ func (b *Broker) Publish(ctx context.Context, signature *tasks.Signature) error 
 			UpdatedAt: now,
 		}
 
-		if _, err := b.taskColl.InsertOne(ctx, task); err != nil {
+		if _, err := b.tc.InsertOne(ctx, task); err != nil {
 			if mongo.IsDuplicateKeyError(err) {
 				// Idempotency: Already exists
 				log.DEBUG.Println("publish failed to insert: idempotency on UUID")
@@ -177,7 +161,7 @@ func (b *Broker) Publish(ctx context.Context, signature *tasks.Signature) error 
 		},
 	}
 
-	res, err := b.taskColl.UpdateOne(ctx, filter, update)
+	res, err := b.tc.UpdateOne(ctx, filter, update)
 	if err != nil {
 		log.ERROR.Printf("publish retry failed to update: error with signature UUID %s: %v", signature.UUID, err)
 
@@ -306,7 +290,7 @@ func (b *Broker) claimNextTask() *Task {
 		SetReturnDocument(options.After)
 
 	var task Task
-	err := b.taskColl.FindOneAndUpdate(context.Background(), filter, update, opts).Decode(&task)
+	err := b.tc.FindOneAndUpdate(context.Background(), filter, update, opts).Decode(&task)
 	if err != nil {
 		if !errors.Is(err, mongo.ErrNoDocuments) {
 			log.ERROR.Println("claim next task failed with error:", err)
@@ -345,7 +329,7 @@ func (b *Broker) handleTask(processor iface.TaskProcessor, signature *tasks.Sign
 		"$set": set,
 	}
 
-	if _, err := b.taskColl.UpdateOne(context.Background(), filter, update); err != nil {
+	if _, err := b.tc.UpdateOne(context.Background(), filter, update); err != nil {
 		log.ERROR.Printf("handle task failed to update: error with signature UUID %s: %v", signature.UUID, err)
 	}
 }
@@ -393,7 +377,7 @@ func (b *Broker) initRecoveryLock() error {
 		LastLockedAt: now,
 	}
 
-	if _, err := b.lockColl.InsertOne(context.Background(), lock); err != nil {
+	if _, err := b.lc.InsertOne(context.Background(), lock); err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			// Lock already exists, another worker initialized it.
 			return nil
@@ -431,7 +415,7 @@ func (b *Broker) lockRecovery() bool {
 	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
 
 	var lockDoc lock
-	err := b.lockColl.FindOneAndUpdate(context.Background(), filter, update, opts).Decode(&lockDoc)
+	err := b.lc.FindOneAndUpdate(context.Background(), filter, update, opts).Decode(&lockDoc)
 	if err != nil {
 		if !errors.Is(err, mongo.ErrNoDocuments) {
 			log.ERROR.Println("lock recovery failed to find one and update:", err)
@@ -449,7 +433,7 @@ func (b *Broker) lockRecovery() bool {
 func (b *Broker) unlockRecovery() {
 	filter := bson.M{"key": b.recoveryLockKey()}
 	update := bson.M{"$set": bson.M{"status": lockStatusUnlocked}}
-	if _, err := b.lockColl.UpdateOne(context.Background(), filter, update); err != nil {
+	if _, err := b.lc.UpdateOne(context.Background(), filter, update); err != nil {
 		log.ERROR.Println("unlock recovery failed to update:", err)
 	}
 }
@@ -475,7 +459,7 @@ func (b *Broker) recoverStuckTasks(expiry time.Duration) {
 			"updated_at":    now,
 		},
 	}
-	res, err := b.taskColl.UpdateMany(context.Background(), filter, update)
+	res, err := b.tc.UpdateMany(context.Background(), filter, update)
 	if err != nil {
 		log.ERROR.Printf("recover stuck tasks failed to update:", err)
 
@@ -487,7 +471,7 @@ func (b *Broker) recoverStuckTasks(expiry time.Duration) {
 
 // createMongoIndexes ensures all indexes are in place for the task collection
 func (b *Broker) createMongoIndexes() error {
-	if _, err := b.taskColl.Indexes().CreateMany(
+	if _, err := b.tc.Indexes().CreateMany(
 		context.Background(),
 		[]mongo.IndexModel{
 			// 1. Unique index on signature.uuid
@@ -529,7 +513,7 @@ func (b *Broker) createMongoIndexes() error {
 		log.ERROR.Println("create mongo indexes failed on task collection:", err)
 	}
 
-	if _, err := b.lockColl.Indexes().CreateMany(
+	if _, err := b.lc.Indexes().CreateMany(
 		context.Background(),
 		[]mongo.IndexModel{
 			// Unique index on key
@@ -558,7 +542,7 @@ func (b *Broker) GetAllTasksByStatusWithLimit(status TaskStatus, limit int64) ([
 	}
 
 	opts := options.Find().SetLimit(limit)
-	cur, err := b.taskColl.Find(ctx, filter, opts)
+	cur, err := b.tc.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, err
 	}

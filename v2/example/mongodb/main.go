@@ -78,12 +78,16 @@ func main() {
 func mongoConfig() *config.Config {
 	uri := "mongodb://mongo:mongo@localhost:27017/?authSource=admin&readPreference=primary"
 	return &config.Config{
-		DefaultQueue:    "test",
-		Broker:          uri,
-		ResultBackend:   uri,
-		ResultsExpireIn: 0,
+		DefaultQueue:  "test",
+		Broker:        uri,
+		ResultBackend: uri,
 		MongoDB: &config.MongoDBConfig{
-			Database: "machinery",
+			Database:                "machinery",
+			TaskCollectionName:      "task",
+			LockCollectionName:      "lock",
+			ResultCollectionName:    "result",
+			GroupMetaCollectionName: "group_meta",
+			StuckTaskExpiry:         5 * time.Minute, // stuck task expiry
 		},
 	}
 }
@@ -91,19 +95,9 @@ func mongoConfig() *config.Config {
 func startServer() (*machinery.Server, error) {
 	cnf := mongoConfig()
 
-	broker, _ := mongodb.New(
-		cnf,
-		&mongodb.Option{
-			TaskCollectionName: "task",
-			LockCollectionName: "lock",
-			StuckTaskExpiry:    5 * time.Minute, // stuck task expiry
-		},
-	)
+	broker, _ := mongodb.New(cnf)
 
-	backend, err := mongo.NewWithOptions(cnf, &mongo.Option{
-		TaskCollectionName:      "result",
-		GroupMetaCollectionName: "group_meta",
-	})
+	backend, err := mongo.New(cnf)
 	if err != nil {
 		return nil, fmt.Errorf("mongo.New backend failed: %v", err)
 	}
