@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	defaultTCName  = "tasks"
-	defaultGMCName = "group_metas"
+	defaultTCName  = "machinery_result"
+	defaultGMCName = "machinery_group_meta"
 )
 
 // Backend represents a MongoDB result backend
