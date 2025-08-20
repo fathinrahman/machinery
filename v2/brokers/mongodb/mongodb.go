@@ -20,9 +20,9 @@ import (
 )
 
 const (
-	defaultTCName          = "machinery_task"
-	defaultLCName          = "machinery_lock"
-	defaultStuckTaskExpiry = 15 * time.Minute
+	defaultTCName       = "machinery_task"
+	defaultLCName       = "machinery_lock"
+	defaultStuckTaskTTL = 30 * time.Second
 )
 
 type TaskStatus string
@@ -44,7 +44,7 @@ type Broker struct {
 	common.MongoDBConnector
 
 	// Configuration
-	stuckTaskExpiry time.Duration
+	stuckTaskTTL time.Duration
 
 	// MongoDB collections
 	tc *mongo.Collection
@@ -74,7 +74,7 @@ func New(cnf *config.Config) (iface.Broker, error) {
 	cnf.MongoDB = setDefaultConfig(cnf.MongoDB)
 
 	b := &Broker{
-		stuckTaskExpiry: cnf.MongoDB.StuckTaskExpiry,
+		stuckTaskTTL: cnf.MongoDB.StuckTaskTTL,
 	}
 
 	db, err := b.MongoDBConnector.Connect(cnf)
@@ -111,8 +111,8 @@ func setDefaultConfig(cnf *config.MongoDBConfig) *config.MongoDBConfig {
 	if cnf.LockCollectionName == "" {
 		cnf.LockCollectionName = defaultLCName
 	}
-	if cnf.StuckTaskExpiry <= 0 {
-		cnf.StuckTaskExpiry = defaultStuckTaskExpiry
+	if cnf.StuckTaskTTL <= 0 {
+		cnf.StuckTaskTTL = defaultStuckTaskTTL
 	}
 
 	return cnf
@@ -248,7 +248,7 @@ func (b *Broker) StartConsuming(
 				return
 			case <-time.After(wait):
 				if b.lockRecovery() {
-					b.recoverStuckTasks(b.stuckTaskExpiry)
+					b.recoverStuckTasks(b.stuckTaskTTL)
 					b.unlockRecovery()
 				}
 				nextMinute = nextMinute.Add(time.Minute) // Move to the next minute
@@ -440,9 +440,6 @@ func (b *Broker) unlockRecovery() {
 
 // recoverStuckTasks resets old "in_progress" tasks to "pending" for retry.
 func (b *Broker) recoverStuckTasks(expiry time.Duration) {
-	if expiry <= 0 {
-		expiry = 15 * time.Minute // default expiry if not set
-	}
 	now := time.Now().UTC()
 	threshold := now.Add(-expiry)
 	filter := bson.M{

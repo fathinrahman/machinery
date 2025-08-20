@@ -87,7 +87,7 @@ func mongoConfig() *config.Config {
 			LockCollectionName:      "lock",
 			ResultCollectionName:    "result",
 			GroupMetaCollectionName: "group_meta",
-			StuckTaskExpiry:         5 * time.Minute, // stuck task expiry
+			StuckTaskTTL:            5 * time.Minute, // stuck task expiry
 		},
 	}
 }
