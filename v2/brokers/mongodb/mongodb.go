@@ -20,9 +20,10 @@ import (
 )
 
 const (
-	defaultTCName       = "machinery_task"
-	defaultLCName       = "machinery_lock"
-	defaultStuckTaskTTL = 30 * time.Second
+	defaultTCName              = "machinery_task"
+	defaultLCName              = "machinery_lock"
+	defaultStuckTaskTTL        = 30 * time.Second
+	defaultFailedTaskRetention = 168 * time.Hour // 7 days
 )
 
 type TaskStatus string
@@ -44,7 +45,9 @@ type Broker struct {
 	common.MongoDBConnector
 
 	// Configuration
-	stuckTaskTTL time.Duration
+	stuckTaskTTL         time.Duration
+	failedTaskRetention  time.Duration
+	successTaskRetention time.Duration
 
 	// MongoDB collections
 	tc *mongo.Collection
@@ -74,7 +77,9 @@ func New(cnf *config.Config) (iface.Broker, error) {
 	cnf.MongoDB = setDefaultConfig(cnf.MongoDB)
 
 	b := &Broker{
-		stuckTaskTTL: cnf.MongoDB.StuckTaskTTL,
+		stuckTaskTTL:         cnf.MongoDB.StuckTaskTTL,
+		failedTaskRetention:  cnf.MongoDB.FailedTaskRetention,
+		successTaskRetention: cnf.MongoDB.SuccessTaskRetention,
 	}
 
 	db, err := b.MongoDBConnector.Connect(cnf)
@@ -113,6 +118,9 @@ func setDefaultConfig(cnf *config.MongoDBConfig) *config.MongoDBConfig {
 	}
 	if cnf.StuckTaskTTL <= 0 {
 		cnf.StuckTaskTTL = defaultStuckTaskTTL
+	}
+	if cnf.FailedTaskRetention <= 0 {
+		cnf.FailedTaskRetention = defaultFailedTaskRetention
 	}
 
 	return cnf
@@ -312,12 +320,10 @@ func (b *Broker) handleTask(processor iface.TaskProcessor, signature *tasks.Sign
 	if err := processor.Process(signature); err != nil {
 		set["status"] = TaskStatusFailed
 		set["error_message"] = err.Error()
-		// schedule the failed task to be deleted 3 days later
-		set["delete_at"] = now.Add(72 * time.Hour)
+		set["delete_at"] = now.Add(b.failedTaskRetention)
 	} else {
 		set["status"] = TaskStatusSuccess
-		// delete successful task immediately
-		set["delete_at"] = now
+		set["delete_at"] = now.Add(b.successTaskRetention)
 	}
 
 	filter := bson.M{

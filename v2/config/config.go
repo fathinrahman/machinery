@@ -177,6 +177,8 @@ type MongoDBConfig struct {
 	GroupMetaCollectionName string
 	LockCollectionName      string
 	StuckTaskTTL            time.Duration
+	FailedTaskRetention     time.Duration
+	SuccessTaskRetention    time.Duration
 }
 
 // Decode from yaml to map (any field whose type or pointer-to-type implements

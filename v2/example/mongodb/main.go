@@ -88,6 +88,8 @@ func mongoConfig() *config.Config {
 			ResultCollectionName:    "result",
 			GroupMetaCollectionName: "group_meta",
 			StuckTaskTTL:            5 * time.Minute, // stuck task expiry
+			FailedTaskRetention:     5 * time.Minute,
+			SuccessTaskRetention:    1 * time.Minute,
 		},
 	}
 }
@@ -261,7 +263,8 @@ func sendTasks() error {
 				{Type: "string", Value: "foo"},
 			},
 		}
-		panicTask = tasks.Signature{Name: "panic_task", RetryCount: 5}
+		panicTask = tasks.Signature{Name: "panic_task", RetryCount: 5,
+			StopTaskDeletionOnError: true}
 		longRunningTask = tasks.Signature{Name: "long_running_task"}
 	}
 

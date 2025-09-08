@@ -21,18 +21,21 @@ import (
 )
 
 const (
-	defaultDatabaseName = "machinery"
-	defaultRCName       = "machinery_result"
-	defaultGMCName      = "machinery_group_meta"
+	defaultDatabaseName        = "machinery"
+	defaultRCName              = "machinery_result"
+	defaultGMCName             = "machinery_group_meta"
+	defaultFailedTaskRetention = 168 * time.Hour // 7 days
 )
 
 // Backend represents a MongoDB result backend
 type Backend struct {
 	common.Backend
-	client *mongo.Client
-	tc     *mongo.Collection
-	gmc    *mongo.Collection
-	once   sync.Once
+	client               *mongo.Client
+	tc                   *mongo.Collection
+	gmc                  *mongo.Collection
+	once                 sync.Once
+	failedTaskRetention  time.Duration
+	successTaskRetention time.Duration
 }
 
 // New creates Backend instance
@@ -40,8 +43,10 @@ func New(cnf *config.Config) (iface.Backend, error) {
 	cnf.MongoDB = setDefaultConfig(cnf.MongoDB)
 
 	backend := &Backend{
-		Backend: common.NewBackend(cnf),
-		once:    sync.Once{},
+		Backend:              common.NewBackend(cnf),
+		once:                 sync.Once{},
+		failedTaskRetention:  cnf.MongoDB.FailedTaskRetention,
+		successTaskRetention: cnf.MongoDB.SuccessTaskRetention,
 	}
 
 	return backend, nil
@@ -56,6 +61,9 @@ func setDefaultConfig(cnf *config.MongoDBConfig) *config.MongoDBConfig {
 	}
 	if cnf.Database == "" {
 		cnf.Database = defaultDatabaseName
+	}
+	if cnf.FailedTaskRetention == 0 {
+		cnf.FailedTaskRetention = defaultFailedTaskRetention
 	}
 
 	return cnf
@@ -176,7 +184,7 @@ func (b *Backend) SetStateSuccess(signature *tasks.Signature, results []*tasks.T
 	update := bson.M{
 		"state":     tasks.StateSuccess,
 		"results":   decodedResults,
-		"delete_at": time.Now().Add(time.Duration(b.GetConfig().ResultsExpireIn) * time.Second),
+		"delete_at": time.Now().Add(b.successTaskRetention),
 	}
 	return b.updateState(signature, update)
 }
@@ -208,7 +216,7 @@ func (b *Backend) SetStateFailure(signature *tasks.Signature, err string) error 
 	update := bson.M{
 		"state":     tasks.StateFailure,
 		"error":     err,
-		"delete_at": time.Now().Add(time.Duration(b.GetConfig().ResultsExpireIn) * time.Second),
+		"delete_at": time.Now().Add(b.failedTaskRetention),
 	}
 	return b.updateState(signature, update)
 }
@@ -376,7 +384,7 @@ func (b *Backend) createMongoIndexes() error {
 		context.Background(), []mongo.IndexModel{
 			{
 				Keys:    bson.M{"delete_at": 1},
-				Options: options.Index().SetBackground(true).SetExpireAfterSeconds(0),
+				Options: options.Index().SetExpireAfterSeconds(0),
 			},
 		},
 	)
