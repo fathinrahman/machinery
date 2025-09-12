@@ -23,7 +23,8 @@ const (
 	defaultTCName              = "machinery_task"
 	defaultLCName              = "machinery_lock"
 	defaultStuckTaskTTL        = 30 * time.Second
-	defaultFailedTaskRetention = 168 * time.Hour // 7 days
+	defaultFailedTaskRetention = 7 * 24 * time.Hour
+	defaultClaimTaskBackoff    = 500 * time.Millisecond
 )
 
 type TaskStatus string
@@ -48,6 +49,7 @@ type Broker struct {
 	stuckTaskTTL         time.Duration
 	failedTaskRetention  time.Duration
 	successTaskRetention time.Duration
+	claimTaskBackoff     time.Duration
 
 	// MongoDB collections
 	tc *mongo.Collection
@@ -80,6 +82,7 @@ func New(cnf *config.Config) (iface.Broker, error) {
 		stuckTaskTTL:         cnf.MongoDB.StuckTaskTTL,
 		failedTaskRetention:  cnf.MongoDB.FailedTaskRetention,
 		successTaskRetention: cnf.MongoDB.SuccessTaskRetention,
+		claimTaskBackoff:     cnf.MongoDB.ClaimTaskBackoff,
 	}
 
 	db, err := b.MongoDBConnector.Connect(cnf)
@@ -121,6 +124,9 @@ func setDefaultConfig(cnf *config.MongoDBConfig) *config.MongoDBConfig {
 	}
 	if cnf.FailedTaskRetention <= 0 {
 		cnf.FailedTaskRetention = defaultFailedTaskRetention
+	}
+	if cnf.ClaimTaskBackoff <= 0 {
+		cnf.ClaimTaskBackoff = defaultClaimTaskBackoff
 	}
 
 	return cnf
@@ -232,7 +238,7 @@ func (b *Broker) StartConsuming(
 						b.handleTask(processor, &task.Signature)
 					} else {
 						// No task, avoid db hammering
-						time.Sleep(100 * time.Millisecond)
+						time.Sleep(b.claimTaskBackoff)
 					}
 				}
 			}

@@ -179,6 +179,7 @@ type MongoDBConfig struct {
 	StuckTaskTTL            time.Duration
 	FailedTaskRetention     time.Duration
 	SuccessTaskRetention    time.Duration
+	ClaimTaskBackoff        time.Duration
 }
 
 // Decode from yaml to map (any field whose type or pointer-to-type implements
