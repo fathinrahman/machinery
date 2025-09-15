@@ -4,3 +4,4 @@ _vendor-*
 .env
 .DS_Store
 dump.rdb
+v2/vendor

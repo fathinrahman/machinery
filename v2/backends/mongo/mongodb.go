@@ -20,23 +20,53 @@ import (
 	"github.com/fathinrahman/machinery/v2/tasks"
 )
 
+const (
+	defaultDatabaseName        = "machinery"
+	defaultRCName              = "machinery_result"
+	defaultGMCName             = "machinery_group_meta"
+	defaultFailedTaskRetention = 168 * time.Hour // 7 days
+)
+
 // Backend represents a MongoDB result backend
 type Backend struct {
 	common.Backend
-	client *mongo.Client
-	tc     *mongo.Collection
-	gmc    *mongo.Collection
-	once   sync.Once
+	client               *mongo.Client
+	tc                   *mongo.Collection
+	gmc                  *mongo.Collection
+	once                 sync.Once
+	failedTaskRetention  time.Duration
+	successTaskRetention time.Duration
 }
 
 // New creates Backend instance
 func New(cnf *config.Config) (iface.Backend, error) {
+	cnf.MongoDB = setDefaultConfig(cnf.MongoDB)
+
 	backend := &Backend{
-		Backend: common.NewBackend(cnf),
-		once:    sync.Once{},
+		Backend:              common.NewBackend(cnf),
+		once:                 sync.Once{},
+		failedTaskRetention:  cnf.MongoDB.FailedTaskRetention,
+		successTaskRetention: cnf.MongoDB.SuccessTaskRetention,
 	}
 
 	return backend, nil
+}
+
+func setDefaultConfig(cnf *config.MongoDBConfig) *config.MongoDBConfig {
+	if cnf.ResultCollectionName == "" {
+		cnf.ResultCollectionName = defaultRCName
+	}
+	if cnf.GroupMetaCollectionName == "" {
+		cnf.GroupMetaCollectionName = defaultGMCName
+	}
+	if cnf.Database == "" {
+		cnf.Database = defaultDatabaseName
+	}
+	if cnf.FailedTaskRetention == 0 {
+		cnf.FailedTaskRetention = defaultFailedTaskRetention
+	}
+
+	return cnf
 }
 
 // InitGroup creates and saves a group meta data object
@@ -112,11 +142,22 @@ func (b *Backend) TriggerChord(groupUUID string) (bool, error) {
 // SetStatePending updates task state to PENDING
 func (b *Backend) SetStatePending(signature *tasks.Signature) error {
 	update := bson.M{
-		"state":      tasks.StatePending,
-		"task_name":  signature.Name,
-		"created_at": time.Now().UTC(),
+		"$set": bson.M{
+			"state": tasks.StatePending,
+		},
+		"$setOnInsert": bson.M{
+			"task_name":  signature.Name,
+			"created_at": time.Now().UTC(),
+		},
 	}
-	return b.updateState(signature, update)
+	_, err := b.tasksCollection().UpdateOne(context.Background(), bson.M{
+		"_id": signature.UUID,
+		// Ensures idempotency: duplicate Publish/SetStatePending calls with the same UUID
+		// will not override a finished or in-progress result (RECEIVED, STARTED, or SUCCESS).
+		// Updates if considered retryable (PENDING, FAILURE, and RETRY).
+		"state": bson.M{"$in": []string{tasks.StatePending, tasks.StateFailure, tasks.StateRetry}},
+	}, update, options.Update().SetUpsert(true))
+	return err
 }
 
 // SetStateReceived updates task state to RECEIVED
@@ -143,7 +184,7 @@ func (b *Backend) SetStateSuccess(signature *tasks.Signature, results []*tasks.T
 	update := bson.M{
 		"state":     tasks.StateSuccess,
 		"results":   decodedResults,
-		"delete_at": time.Now().Add(time.Duration(b.GetConfig().ResultsExpireIn) * time.Second),
+		"delete_at": time.Now().Add(b.successTaskRetention),
 	}
 	return b.updateState(signature, update)
 }
@@ -175,7 +216,7 @@ func (b *Backend) SetStateFailure(signature *tasks.Signature, err string) error 
 	update := bson.M{
 		"state":     tasks.StateFailure,
 		"error":     err,
-		"delete_at": time.Now().Add(time.Duration(b.GetConfig().ResultsExpireIn) * time.Second),
+		"delete_at": time.Now().Add(b.failedTaskRetention),
 	}
 	return b.updateState(signature, update)
 }
@@ -293,19 +334,18 @@ func (b *Backend) connect() error {
 	}
 	b.client = client
 
-	database := "machinery"
+	database := b.GetConfig().MongoDB.Database
 
-	if b.GetConfig().MongoDB != nil {
-		database = b.GetConfig().MongoDB.Database
-	}
+	b.tc = b.client.Database(database).Collection(
+		b.GetConfig().MongoDB.ResultCollectionName)
+	b.gmc = b.client.Database(database).Collection(
+		b.GetConfig().MongoDB.GroupMetaCollectionName)
 
-	b.tc = b.client.Database(database).Collection("tasks")
-	b.gmc = b.client.Database(database).Collection("group_metas")
-
-	err = b.createMongoIndexes(database)
+	err = b.createMongoIndexes()
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -318,8 +358,8 @@ func (b *Backend) dial() (*mongo.Client, error) {
 	}
 
 	uri := b.GetConfig().ResultBackend
-	if strings.HasPrefix(uri, "mongodb://") == false &&
-		strings.HasPrefix(uri, "mongodb+srv://") == false {
+	if !strings.HasPrefix(uri, "mongodb://") &&
+		!strings.HasPrefix(uri, "mongodb+srv://") {
 		uri = fmt.Sprintf("mongodb://%s", uri)
 	}
 
@@ -339,15 +379,12 @@ func (b *Backend) dial() (*mongo.Client, error) {
 }
 
 // createMongoIndexes ensures all indexes are in place
-func (b *Backend) createMongoIndexes(database string) error {
-
-	tasksCollection := b.client.Database(database).Collection("tasks")
-
-	_, err := tasksCollection.Indexes().CreateMany(
+func (b *Backend) createMongoIndexes() error {
+	_, err := b.tc.Indexes().CreateMany(
 		context.Background(), []mongo.IndexModel{
 			{
 				Keys:    bson.M{"delete_at": 1},
-				Options: options.Index().SetBackground(true).SetExpireAfterSeconds(0),
+				Options: options.Index().SetExpireAfterSeconds(0),
 			},
 		},
 	)
