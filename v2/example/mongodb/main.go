@@ -164,7 +164,8 @@ func sendTask() error {
 	}
 
 	// Create task with ETA n seconds from now
-	eta := time.Now().Add(3 * time.Second)
+	delay := 3 * time.Second
+	eta := time.Now().Add(delay)
 	signature := &tasks.Signature{
 		// UUID: "idempotency_key", // Comment this to ignore idempotency
 		Name: "add",
@@ -184,8 +185,8 @@ func sendTask() error {
 	}
 
 	log.INFO.Printf(
-		"Task sent with ETA = %s (wait 10s before worker picks it up), task UUID: %s\n",
-		eta.Format(time.RFC3339), asyncResult.Signature.UUID,
+		"Task sent with ETA = %s (wait %v before worker picks it up), task UUID: %s\n",
+		eta.Format(time.RFC3339), delay, asyncResult.Signature.UUID,
 	)
 
 	return nil
