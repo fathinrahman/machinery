@@ -227,18 +227,27 @@ func (b *Broker) StartConsuming(
 				}
 				b.processingWG.Done()
 			}()
+
+			claimTaskTime := time.Now().UTC()
 			for {
+				wait := time.Until(claimTaskTime)
 				select {
 				case <-b.Broker.GetStopChan():
 					return
-				default:
+				case <-time.After(wait):
 					task := b.claimNextTask()
 					if task != nil {
 						log.DEBUG.Printf("Worker %d claiming task: %s", workerIdx, task.Signature.UUID)
 						b.handleTask(processor, &task.Signature)
 					} else {
 						// No task, avoid db hammering
-						time.Sleep(b.claimTaskBackoff)
+						claimTaskTime = time.Now().UTC().Add(b.claimTaskBackoff)
+						if nextTask := b.findNextPendingTask(); nextTask != nil {
+							eta := *nextTask.Signature.ETA
+							if (eta).Before(claimTaskTime) {
+								claimTaskTime = eta
+							}
+						}
 					}
 				}
 			}
@@ -567,4 +576,23 @@ func (b *Broker) GetAllTasksByStatusWithLimit(status TaskStatus, limit int64) ([
 	}
 
 	return tasks, nil
+}
+
+func (b *Broker) findNextPendingTask() *Task {
+	filter := bson.M{
+		"queue":  b.GetConfig().DefaultQueue,
+		"status": TaskStatusPending,
+	}
+	opts := options.FindOne().
+		SetSort(bson.D{
+			{Key: "signature.priority", Value: -1},
+			{Key: "signature.eta", Value: 1},
+		})
+
+	var task Task
+	if err := b.tc.FindOne(context.Background(), filter, opts).Decode(&task); err != nil {
+		return nil
+	}
+
+	return &task
 }

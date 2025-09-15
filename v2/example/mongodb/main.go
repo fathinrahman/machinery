@@ -90,6 +90,7 @@ func mongoConfig() *config.Config {
 			StuckTaskTTL:            5 * time.Minute, // stuck task expiry
 			FailedTaskRetention:     5 * time.Minute,
 			SuccessTaskRetention:    1 * time.Minute,
+			ClaimTaskBackoff:        10 * time.Second,
 		},
 	}
 }
@@ -163,7 +164,7 @@ func sendTask() error {
 	}
 
 	// Create task with ETA n seconds from now
-	eta := time.Now().Add(10 * time.Second)
+	eta := time.Now().Add(3 * time.Second)
 	signature := &tasks.Signature{
 		// UUID: "idempotency_key", // Comment this to ignore idempotency
 		Name: "add",
