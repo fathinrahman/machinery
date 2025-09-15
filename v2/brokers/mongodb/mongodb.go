@@ -242,10 +242,9 @@ func (b *Broker) StartConsuming(
 					} else {
 						// No task, avoid db hammering
 						claimTaskTime = time.Now().UTC().Add(b.claimTaskBackoff)
-						if nextTask := b.findNextPendingTask(); nextTask != nil {
-							eta := *nextTask.Signature.ETA
-							if (eta).Before(claimTaskTime) {
-								claimTaskTime = eta
+						if nextETA := b.findNextPendingTaskETA(); nextETA != nil {
+							if (nextETA).Before(claimTaskTime) {
+								claimTaskTime = *nextETA
 							}
 						}
 					}
@@ -578,7 +577,13 @@ func (b *Broker) GetAllTasksByStatusWithLimit(status TaskStatus, limit int64) ([
 	return tasks, nil
 }
 
-func (b *Broker) findNextPendingTask() *Task {
+type TaskETAProjection struct {
+	Signature struct {
+		ETA *time.Time `bson:"eta"`
+	} `bson:"signature"`
+}
+
+func (b *Broker) findNextPendingTaskETA() *time.Time {
 	filter := bson.M{
 		"queue":  b.GetConfig().DefaultQueue,
 		"status": TaskStatusPending,
@@ -587,12 +592,15 @@ func (b *Broker) findNextPendingTask() *Task {
 		SetSort(bson.D{
 			{Key: "signature.priority", Value: -1},
 			{Key: "signature.eta", Value: 1},
+		}).
+		SetProjection(bson.M{
+			"signature.eta": 1,
 		})
 
-	var task Task
-	if err := b.tc.FindOne(context.Background(), filter, opts).Decode(&task); err != nil {
+	var eta TaskETAProjection
+	if err := b.tc.FindOne(context.Background(), filter, opts).Decode(&eta); err != nil {
 		return nil
 	}
 
-	return &task
+	return eta.Signature.ETA
 }
